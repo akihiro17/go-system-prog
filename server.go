@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -25,26 +27,39 @@ func main() {
 		}
 
 		go func() {
+			defer conn.Close()
 			fmt.Printf("Accept %v¥n", conn.RemoteAddr())
 
-			request, err := http.ReadRequest(bufio.NewReader(conn))
-			if err != nil {
-				panic(err)
-			}
+			for {
+				conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+				request, err := http.ReadRequest(bufio.NewReader(conn))
+				if err != nil {
+					neterr, ok := err.(net.Error)
+					if ok && neterr.Timeout() {
+						fmt.Println("timeout")
+						break
+					} else if err == io.EOF {
+						break
+					}
+					panic(err)
+				}
 
-			dump, err := httputil.DumpRequest(request, true)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println(string(dump))
+				dump, err := httputil.DumpRequest(request, true)
+				if err != nil {
+					panic(err)
+				}
+				fmt.Println(string(dump))
 
-			response := http.Response{
-				StatusCode: 200,
-				ProtoMajor: 1,
-				ProtoMinor: 0,
-				Body:       ioutil.NopCloser(strings.NewReader("Hello World"))}
-			response.Write(conn)
-			conn.Close()
+				content := "Hello World\n"
+				response := http.Response{
+					StatusCode:    200,
+					ProtoMajor:    1,
+					ProtoMinor:    1,
+					ContentLength: int64(len(content)),
+					Body:          ioutil.NopCloser(strings.NewReader(content))}
+
+				response.Write(conn)
+			}
 		}()
 
 	}
